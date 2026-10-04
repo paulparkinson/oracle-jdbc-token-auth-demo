@@ -11,7 +11,7 @@ Companion article: [Passwordless Java connections with OCI IAM and Microsoft Ent
 - The appropriate IAM or Entra identity, policy/app-role permission and database mapping. Follow [the complete setup guide](docs/setup.md) first. OCI IAM and Entra use separate lab database configurations.
 - An OCI CLI installation for file-token examples; cloud runtime credentials for workload identities.
 
-Pinned and build-tested: Oracle JDBC `ojdbc17` and `ucp17` **23.26.3.0.0**, OCI and Azure JDBC providers **1.1.0**, OCI SDK **3.86.2**. Database branding (26ai) and Maven versions are different. Provider dependencies bring their cloud SDKs; the POM excludes transitive `ojdbc8` to keep one driver. Original JARs remain separate so ServiceLoader descriptors are preserved.
+Pinned and build-tested: Oracle JDBC `ojdbc17` and `ucp17` **23.26.3.0.0**, OCI and Azure JDBC providers **1.1.0**, OCI SDK **3.86.2**. Database branding (26ai) and Maven versions are different. Provider dependencies bring their cloud SDKs. The providers declare `ojdbc8` as `provided`, so no driver exclusion is needed; this application explicitly uses `ojdbc17`. Original JARs remain separate so ServiceLoader descriptors are preserved.
 
 ## Build and configure
 

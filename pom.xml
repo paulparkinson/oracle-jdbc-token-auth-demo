@@ -18,10 +18,8 @@
     <dependency><groupId>com.oracle.database.jdbc</groupId><artifactId>ucp17</artifactId><version>${jdbc.version}</version></dependency>
     <dependency><groupId>com.oracle.database.security</groupId><artifactId>oraclepki</artifactId><version>${jdbc.version}</version></dependency>
     <dependency><groupId>com.oracle.database.jdbc</groupId><artifactId>ojdbc-provider-oci</artifactId><version>${providers.version}</version><scope>runtime</scope>
-      <exclusions><exclusion><groupId>com.oracle.database.jdbc</groupId><artifactId>ojdbc8</artifactId></exclusion></exclusions>
     </dependency>
     <dependency><groupId>com.oracle.database.jdbc</groupId><artifactId>ojdbc-provider-azure</artifactId><version>${providers.version}</version><scope>runtime</scope>
-      <exclusions><exclusion><groupId>com.oracle.database.jdbc</groupId><artifactId>ojdbc8</artifactId></exclusion></exclusions>
     </dependency>
     <dependency><groupId>com.oracle.oci.sdk</groupId><artifactId>oci-java-sdk-identitydataplane</artifactId></dependency>
     <dependency><groupId>com.oracle.oci.sdk</groupId><artifactId>oci-java-sdk-common-httpclient-jersey</artifactId><scope>runtime</scope></dependency>
