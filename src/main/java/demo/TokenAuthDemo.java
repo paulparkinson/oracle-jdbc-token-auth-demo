@@ -77,7 +77,7 @@ public final class TokenAuthDemo {
         ds.setInitialPoolSize(0);
         ds.setMinPoolSize(0);
         ds.setMaxPoolSize(2);
-        ds.setConnectionWaitTimeout(20);
+        ds.setConnectionWaitDuration(java.time.Duration.ofSeconds(fresh ? 60 : 20));
         ds.setValidateConnectionOnBorrow(true);
         if (tokens != null) ds.setTokenSupplier(tokens);
         // Diagnostic mode forces replacement physical connections after each borrow.
@@ -94,7 +94,11 @@ public final class TokenAuthDemo {
                 final int current = round;
                 List<Callable<Void>> tasks = new ArrayList<>();
                 for (int i = 0; i < 4; i++) tasks.add(() -> {
-                    try (Connection c = ds.getConnection()) { query(c, current); }
+                    try (Connection c = ds.getConnection()) {
+                        query(c, current);
+                        // Explicit invalidation retires this physical session on return.
+                        if (fresh) ((oracle.ucp.jdbc.ValidConnection) c).setInvalid();
+                    }
                     return null;
                 });
                 for (var result : executor.invokeAll(tasks)) result.get();

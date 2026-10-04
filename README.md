@@ -126,7 +126,7 @@ Browser/device-code paths authenticate a human; service-principal/managed-identi
 # Or use config/oci-sdk.properties / config/entra-service-principal.properties.
 ```
 
-Token expiry governs creation of new authenticated connections. A still-open pooled session can keep working after its login token expires, so repeated borrows alone do not prove refresh. `ucp-fresh` sets `MaxConnectionReuseCount=1` for diagnostic purposes. Output includes session IDs to make new physical connections visible. Run longer than the actual issuer token lifetime; no unit test proves cloud refresh.
+Token expiry governs creation of new authenticated connections. A still-open pooled session can keep working after its login token expires, so repeated borrows alone do not prove refresh. `ucp-fresh` sets `MaxConnectionReuseCount=1` and explicitly marks each connection invalid before returning it, so UCP retires the physical session. It allows a bounded 60-second replacement wait. Output includes session IDs for diagnosis, although the server can recycle those IDs. Run longer than the actual issuer token lifetime; no unit test proves cloud refresh.
 
 Illustrative successful output (values depend on your identity/server):
 
