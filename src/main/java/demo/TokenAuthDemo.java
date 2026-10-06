@@ -31,13 +31,17 @@ public final class TokenAuthDemo {
             if (rounds < 1 || rounds > 10000 || pause < 0 || pause > 86400)
                 throw new IllegalArgumentException("rounds: 1..10000; pauseSeconds: 0..86400");
             Settings config = Settings.load(Path.of(args[0]), System.getenv());
-            if (action.equals("builder") && !config.mode().equals("sdk"))
+            if (action.equals("builder") && !java.util.Set.of("sdk", "entra-sdk").contains(config.mode()))
                 throw new IllegalArgumentException("builder requires SDK mode");
             if (action.equals("check")) {
                 System.out.println("Configuration valid: mode=" + config.mode() + "; no cloud or database connection attempted");
                 return;
             }
-            Supplier<? extends AccessToken> tokens = config.mode().equals("sdk") ? OciTokens.cached(config.app()) : null;
+            Supplier<? extends AccessToken> tokens = switch (config.mode()) {
+                case "sdk" -> OciTokens.cached(config.app());
+                case "entra-sdk" -> action.equals("builder") ? EntraTokens.supplier(config.app()) : EntraTokens.cached(config.app());
+                default -> null;
+            };
             if (action.startsWith("ucp")) runPool(config, tokens, action.equals("ucp-fresh"), rounds, pause);
             else {
                 OracleDataSource ds = new OracleDataSource();
@@ -46,7 +50,8 @@ public final class TokenAuthDemo {
                 if (tokens != null && !action.equals("builder")) ds.setTokenSupplier(tokens);
                 for (int round = 1; round <= rounds; round++) {
                     try (Connection c = action.equals("builder")
-                            ? ds.createConnectionBuilder().accessToken(OciTokens.request(config.app())).build()
+                            ? ds.createConnectionBuilder().accessToken(config.mode().equals("sdk")
+                                ? OciTokens.request(config.app()) : tokens.get()).build()
                             : ds.getConnection()) {
                         query(c, round);
                     }
@@ -62,6 +67,8 @@ public final class TokenAuthDemo {
                 System.err.println("Run failed: " + cause.getClass().getSimpleName());
                 if (cause instanceof SQLException sql)
                     System.err.println("Oracle error code=" + sql.getErrorCode() + "; SQLState=" + sql.getSQLState());
+                if (cause instanceof oracle.ucp.UniversalConnectionPoolException poolFailure)
+                    System.err.println("UCP error code=" + poolFailure.getErrorCode());
                 System.err.println("See docs/troubleshooting.md. Credential values and exception payloads are not logged.");
             }
             System.exit(1);
@@ -80,8 +87,7 @@ public final class TokenAuthDemo {
         ds.setConnectionWaitDuration(java.time.Duration.ofSeconds(fresh ? 60 : 20));
         ds.setValidateConnectionOnBorrow(true);
         if (tokens != null) ds.setTokenSupplier(tokens);
-        // Diagnostic mode forces replacement physical connections after each borrow.
-        if (fresh) ds.setMaxConnectionReuseCount(1);
+        // Diagnostic mode purges only between completed rounds, with no borrowers.
         return ds;
     }
 
@@ -96,12 +102,19 @@ public final class TokenAuthDemo {
                 for (int i = 0; i < 4; i++) tasks.add(() -> {
                     try (Connection c = ds.getConnection()) {
                         query(c, current);
-                        // Explicit invalidation retires this physical session on return.
-                        if (fresh) ((oracle.ucp.jdbc.ValidConnection) c).setInvalid();
                     }
                     return null;
                 });
                 for (var result : executor.invokeAll(tasks)) result.get();
+                if (fresh) {
+                    // Keep the same data source/token cache, but retire all physical
+                    // sessions after all workers have returned their connections.
+                    UniversalConnectionPoolManagerImpl.getUniversalConnectionPoolManager()
+                            .purgeConnectionPool(ds.getConnectionPoolName());
+                    if (ds.getAvailableConnectionsCount() != 0 || ds.getBorrowedConnectionsCount() != 0)
+                        throw new IllegalStateException("Diagnostic purge did not empty the pool");
+                    System.out.println("round=" + round + " poolPurged=true available=0 borrowed=0");
+                }
                 if (round < rounds) Thread.sleep(pause * 1000L);
             }
         } finally {

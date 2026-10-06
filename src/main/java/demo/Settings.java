@@ -27,14 +27,10 @@ public record Settings(String url, String mode, Properties jdbc, Properties app)
             values.setProperty(key, result.toString());
         }
         String url = required(values, "app.url");
-        if (!url.startsWith("jdbc:oracle:thin:@") || url.contains("?") || url.contains("\n"))
-            throw new IllegalArgumentException("Use a credential-free Oracle Thin URL without query parameters; put options in the properties file");
-        String lower = url.toLowerCase(java.util.Locale.ROOT);
-        if (!(lower.startsWith("jdbc:oracle:thin:@tcps://") || lower.contains("(protocol=tcps)")))
-            throw new IllegalArgumentException("Use an explicit TCPS URL or TCPS descriptor from Database Connection");
+        validateUrl(url);
         String mode = values.getProperty("app.mode", "provider");
-        if (!java.util.Set.of("file", "provider", "sdk").contains(mode))
-            throw new IllegalArgumentException("app.mode must be file, provider, or sdk");
+        if (!java.util.Set.of("file", "provider", "sdk", "entra-sdk").contains(mode))
+            throw new IllegalArgumentException("app.mode must be file, provider, sdk, or entra-sdk");
         Properties jdbc = new Properties();
         for (String key : values.stringPropertyNames()) {
             if (key.startsWith("app.")) continue;
@@ -42,26 +38,58 @@ public record Settings(String url, String mode, Properties jdbc, Properties app)
                 throw new IllegalArgumentException("Unexpected property: " + key);
             if (java.util.Set.of("oracle.jdbc.user", "oracle.jdbc.password").contains(key))
                 throw new IllegalArgumentException("Do not set database credentials for token authentication");
+            if (key.startsWith("oracle.jdbc.provider.accessToken") || key.equals("oracle.jdbc.accessToken")
+                    || key.equals("oracle.jdbc.passwordAuthentication") || key.startsWith("oracle.net.seps_")
+                    || key.equals("oracle.net.tns_admin"))
+                throw new IllegalArgumentException("Use only the selected token mechanism and EZConnect+; unsupported property: " + key);
+            if (java.util.Set.of("oracle.net.ssl_server_dn_match", "oracle.net.tls_server_dn_match").contains(key)
+                    && !java.util.Set.of("true", "yes", "on").contains(values.getProperty(key).toLowerCase(java.util.Locale.ROOT)))
+                throw new IllegalArgumentException("TLS server identity verification must remain enabled");
             jdbc.setProperty(key, values.getProperty(key));
         }
-        jdbc.setProperty("oracle.net.ssl_server_dn_match", "true");
         jdbc.putIfAbsent("oracle.net.CONNECT_TIMEOUT", "15000");
         jdbc.putIfAbsent("oracle.jdbc.ReadTimeout", "30000");
-        String provider = jdbc.getProperty("oracle.jdbc.provider.accessToken");
         String tokenAuth = jdbc.getProperty("oracle.jdbc.tokenAuthentication");
         if (mode.equals("provider")) {
-            if (!java.util.Set.of("ojdbc-provider-oci-token", "ojdbc-provider-azure-token").contains(provider == null ? "" : provider))
-                throw new IllegalArgumentException("Set a supported accessToken provider");
-            required(jdbc, "oracle.jdbc.provider.accessToken.scope");
-            required(jdbc, "oracle.jdbc.provider.accessToken.authenticationMethod");
-            if (tokenAuth != null) throw new IllegalArgumentException("Do not mix provider and tokenAuthentication settings");
-        } else if (provider != null || (mode.equals("sdk") && tokenAuth != null)) {
+            if (!java.util.Set.of("OCI_API_KEY", "OCI_INSTANCE_PRINCIPAL", "OCI_RESOURCE_PRINCIPAL",
+                    "OCI_DELEGATION_TOKEN", "OCI_INTERACTIVE", "AZURE_SERVICE_PRINCIPAL",
+                    "AZURE_MANAGED_IDENTITY", "AZURE_INTERACTIVE", "AZURE_DEVICE_CODE").contains(tokenAuth == null ? "" : tokenAuth))
+                throw new IllegalArgumentException("Set a supported oracle.jdbc.tokenAuthentication method");
+            if (tokenAuth.startsWith("OCI_")) {
+                required(jdbc, "oracle.jdbc.ociCompartment");
+                required(jdbc, "oracle.jdbc.ociDatabase");
+            } else required(jdbc, "oracle.jdbc.azureDatabaseApplicationIdUri");
+        } else if (!mode.equals("file") && tokenAuth != null) {
             throw new IllegalArgumentException("Use only one token acquisition mechanism");
-        } else if (mode.equals("file") && !"OCI_TOKEN".equals(tokenAuth)) {
-            throw new IllegalArgumentException("File mode requires OCI_TOKEN");
+        } else if (mode.equals("file")) {
+            if (!java.util.Set.of("OCI_TOKEN", "OAUTH").contains(tokenAuth == null ? "" : tokenAuth))
+                throw new IllegalArgumentException("File mode requires OCI_TOKEN or OAUTH");
+            required(jdbc, "oracle.jdbc.tokenLocation");
         }
         if (mode.equals("sdk")) required(values, "app.oci.scope");
+        if (mode.equals("entra-sdk")) {
+            required(values, "app.entra.scope");
+            if (!java.util.Set.of("service-principal", "managed-identity", "interactive", "device-code", "azure-cli")
+                    .contains(required(values, "app.entra.authentication")))
+                throw new IllegalArgumentException("Unsupported app.entra.authentication");
+        }
         return new Settings(url, mode, jdbc, values);
+    }
+
+    private static void validateUrl(String url) {
+        String[] parts = url.split("\\?", -1);
+        if (parts.length > 2 || !parts[0].matches("jdbc:oracle:thin:@tcps://[A-Za-z0-9.-]+:[0-9]+/[A-Za-z0-9_.-]+"))
+            throw new IllegalArgumentException("Use EZConnect+: jdbc:oracle:thin:@tcps://host:port/service (no credentials, aliases, or descriptors)");
+        if (parts.length == 2) {
+            var seen = new java.util.HashSet<String>();
+            for (String option : parts[1].split("&", -1)) {
+                String[] pair = option.split("=", -1);
+                String key = pair[0].toLowerCase(java.util.Locale.ROOT);
+                if (pair.length != 2 || !java.util.Set.of("connect_timeout", "transport_connect_timeout", "retry_count", "retry_delay").contains(key)
+                        || !pair[1].matches("[0-9]+(?:ms|sec|min)?") || !seen.add(key))
+                    throw new IllegalArgumentException("Only bounded transport options are accepted in the EZConnect+ URL; keep token settings in properties");
+            }
+        }
     }
 
     static String required(Properties values, String key) {

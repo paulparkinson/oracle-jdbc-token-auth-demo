@@ -27,22 +27,28 @@ Sources: [enable IAM](https://docs.oracle.com/en/cloud/paas/autonomous-database/
 
 1. Register the **database resource application** in the Entra tenant. Record its application ID and Application ID URI. Expose a delegated database scope such as `session:scope:connect` for interactive clients. The URI identifies the database resource; it is not the Java client's ID.
 2. On that database registration, define the app-role **value** `TokenDemo.Connect` (the display name can differ). Allow Applications for client credentials and Users/Groups for interactive users, according to the intended scenarios.
-3. Register the **Java client application** separately. For service-principal authentication, add the database app's Application permission `TokenDemo.Connect` and grant administrator consent. Configure a certificate or create a client secret. `AZURE_CLIENT_ID` identifies this Java client, whereas `ENTRA_DB_SCOPE` identifies the database resource followed by `/.default`.
+3. Register the **Java client application** separately. For service-principal authentication, add the database app's Application permission `TokenDemo.Connect` and grant administrator consent. Configure a certificate or create a client secret. `AZURE_CLIENT_ID` identifies this Java client, whereas `ENTRA_DB_APP_ID_URI` is the bare database resource URI used by provider profiles. `ENTRA_DB_SCOPE` is that resource followed by `/.default` for workload SDK/file acquisition.
 4. For browser authentication, configure the client as a public/native client and register `http://localhost:8400` as its redirect URI. Give it the delegated database permission and any required consent. Assign the user/group to the database application's role. For device-code authentication enable the appropriate public-client flow. These flows are subject to tenant Conditional Access policy. For v2 interactive tokens, configure the `upn` optional claim as described in Oracle's guide.
 5. For managed identity, assign the database app role to the managed identity's service principal; enabling an Azure VM identity alone does not grant database access. Use the identity's client ID for a user-assigned identity. Unset `AZURE_CLIENT_ID` for a system-assigned identity so an unrelated application ID is not selected.
 6. As ADMIN on the Entra lab database, run `@sql/entra-setup.sql`. Supply the tenant and **database** registration values. The script enables `AZURE_AD`, maps `AZURE_ROLE=TokenDemo.Connect` to TOKEN_DEMO, and grants CREATE SESSION. The SQL provider identifier remains AZURE_AD even though the product is now called Entra ID.
-7. For a v1 token, match the registered database Application ID URI. For v2, follow Oracle's audience configuration guidance; the token audience is the application ID. Verify the token version and resource configuration with the administrators rather than substituting a Microsoft Graph scope.
+7. If Entra is already enabled for this resource, preserve its configuration and existing DDS roles. Add only the dedicated role and assignment, inspect whether TOKEN_DEMO already exists, then run just the CREATE USER and GRANT statements if it does not. Do not run the first-time enablement script against an existing integration.
+8. For a v1 token, match the registered database Application ID URI. For v2, follow Oracle's audience configuration guidance; the token audience is the application ID. Verify the token version and resource configuration with the administrators rather than substituting a Microsoft Graph scope.
 
 Sources: [registration, roles, consent, token versions, and server setup](https://docs.oracle.com/en/cloud/paas/autonomous-database/serverless/adbsb/autonomous-azure-ad-enable.html), [schema mapping](https://docs.oracle.com/en/cloud/paas/autonomous-database/serverless/adbsb/autonomous-azure-ad-role-schema-map.html), [managed identity app-role assignment](https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/assign-app-role-managed-identity-azure-cli).
 
 ## TLS and wallets
 
-Copy the connection descriptor for the chosen database service from Database Connection in OCI. Preserve TCPS, host, port, service name, and security attributes. Set `ADB_JDBC_URL` to `jdbc:oracle:thin:@` followed by that descriptor. This demo accepts explicit TCPS descriptors or `tcps://` URLs; it deliberately rejects URL query parameters and TNS aliases so transport requirements remain visible. Use `(protocol=tcps)` without spaces around `=` in the descriptor.
+Use the TCPS host, port, and service from Database Connection in an EZConnect+ URL:
+
+```text
+jdbc:oracle:thin:@tcps://<adb-host>:1522/<service>?connect_timeout=20
+```
+
+The demo deliberately accepts a single-host EZConnect+ TCPS URL, not aliases or full descriptors. It permits only numeric connection/retry URL options; keep authentication properties out of URLs. Driver-default server identity matching remains enabled without adding a DN-match URL flag.
 
 For mTLS, extract the wallet to a private directory outside the checkout, copy a profile to an ignored `*.local.properties` file, and add:
 
 ```properties
-oracle.net.tns_admin=${ADB_WALLET_DIR}
 oracle.net.wallet_location=(SOURCE=(METHOD=FILE)(METHOD_DATA=(DIRECTORY=${ADB_WALLET_DIR})))
 ```
 

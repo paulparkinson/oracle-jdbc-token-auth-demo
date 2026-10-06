@@ -13,6 +13,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class TokenCacheTest {
     @Test void concurrentBorrowersShareOneAcquisition() throws Exception {
+        checkConcurrentCache(true);
+    }
+
+    @Test void entraBearerCacheDoesNotRequireProofOfPossessionKey() throws Exception {
+        checkConcurrentCache(false);
+    }
+
+    private void checkConcurrentCache(boolean proofOfPossession) throws Exception {
         // Locally signed synthetic token: never sent to a cloud or database.
         var gen = KeyPairGenerator.getInstance("RSA");
         gen.initialize(2048);
@@ -24,7 +32,9 @@ class TokenCacheTest {
         var signer = Signature.getInstance("SHA256withRSA");
         signer.initSign(pair.getPrivate());
         signer.update(input.getBytes(StandardCharsets.US_ASCII));
-        var token = AccessToken.createJsonWebToken((input + "." + b64.encodeToString(signer.sign())).toCharArray(), pair.getPrivate());
+        char[] jwt = (input + "." + b64.encodeToString(signer.sign())).toCharArray();
+        var token = proofOfPossession ? AccessToken.createJsonWebToken(jwt, pair.getPrivate())
+                : AccessToken.createJsonWebToken(jwt);
         var requests = new AtomicInteger();
         var cache = AccessToken.createJsonWebTokenCache(() -> {requests.incrementAndGet(); return token;});
         var workers = Executors.newFixedThreadPool(8);
